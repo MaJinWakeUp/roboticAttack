@@ -177,7 +177,11 @@ def main():
             render(env)
             success = env.check_success()
             print(f"reward={reward:.3f} done={done} success={success} action={action.tolist()}")
+            if success:
+                print(f"[success] Task succeeded at manual step {step_idx + 1} (reward={reward:.3f}).", flush=True)
+                break
             if done and args.stop_on_done:
+                print(f"[done] Episode ended at manual step {step_idx + 1} before success (reward={reward:.3f}).", flush=True)
                 break
     finally:
         env.close()

@@ -180,26 +180,29 @@ class ButtonController:
         self.step(self.active_action())
         self.active_after_id = self.root.after(self.args.repeat_ms, self.repeat_active_action)
 
-    def stop_action(self):
+    def stop_action(self, status="Stopped"):
         self.active_action = None
         if self.active_after_id is not None:
             self.root.after_cancel(self.active_after_id)
             self.active_after_id = None
-        self.status_var.set("Stopped")
+        if status is not None:
+            self.status_var.set(status)
 
     def reset(self):
-        self.stop_action()
+        self.stop_action(status=None)
         self.step_count = 0
         self.env.reset()
+        status = "Ready"
         try:
             initial_states = self.task_suite.get_task_init_states(self.args.task_id)
             obs = self.env.set_init_state(initial_states[self.args.init_state_id])
         except Exception as exc:
-            self.status_var.set(f"Using env.reset() state; fixed init unavailable: {exc}")
+            status = f"Using env.reset() state; fixed init unavailable: {exc}"
             obs = self.env.reset()
         render(self.env)
         self.last_done = False
         self.last_success = False
+        self.status_var.set(status)
         return obs
 
     def step(self, action):
@@ -209,13 +212,20 @@ class ButtonController:
         self.last_reward = float(reward)
         self.last_done = bool(done)
         self.last_success = bool(self.env.check_success())
-        self.status_var.set(
+        status = (
             f"step={self.step_count} reward={self.last_reward:.3f} "
             f"done={self.last_done} success={self.last_success} "
             f"action={np.array2string(np.round(action, 3), precision=3, separator=', ', max_line_width=80)}"
         )
+        if self.last_success:
+            status = f"[success] Task succeeded at step {self.step_count} (reward={self.last_reward:.3f})."
+            print(status, flush=True)
+        elif self.last_done:
+            status = f"[done] Episode ended at step {self.step_count} before success (reward={self.last_reward:.3f})."
+            print(status, flush=True)
+        self.status_var.set(status)
         if self.last_done or self.last_success:
-            self.stop_action()
+            self.stop_action(status=None)
 
     def close(self):
         self.stop_action()

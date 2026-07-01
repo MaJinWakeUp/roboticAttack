@@ -86,6 +86,10 @@ if [[ -n "${PATCH_VIEW_SCALE:-}" ]]; then
     ARGS+=(--patch_view_scale "${PATCH_VIEW_SCALE}")
 fi
 
+if [[ -n "${FINAL_MESSAGE_SECONDS:-}" ]]; then
+    ARGS+=(--final_message_seconds "${FINAL_MESSAGE_SECONDS}")
+fi
+
 if [[ "${PATCH_VIEW_FLIP_X:-1}" == "0" ]]; then
     ARGS+=(--no-patch_view_flip_x)
 fi

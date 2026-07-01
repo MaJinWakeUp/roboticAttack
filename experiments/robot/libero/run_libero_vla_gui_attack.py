@@ -86,6 +86,7 @@ def parse_args():
     parser.add_argument("--show_patch_view", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--patch_view_scale", type=float, default=2.0)
     parser.add_argument("--patch_view_flip_x", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--final_message_seconds", type=float, default=2.0)
     return parser.parse_args()
 
 
@@ -158,6 +159,13 @@ class PatchViewer:
         self.root.update_idletasks()
         self.root.update()
 
+    def set_status(self, text):
+        if self.root is None:
+            return
+        self.status_label.configure(text=text)
+        self.root.update_idletasks()
+        self.root.update()
+
     def close(self):
         if self.root is None:
             return
@@ -195,8 +203,17 @@ def run_policy(args, cfg, model, processor, env, task_suite, task_id, prompt, pa
         obs, reward, done, _ = env.step(action.tolist())
         render(env)
         success = env.check_success()
-        print(f"step={t - args.num_steps_wait + 1} reward={reward:.3f} done={done} success={success}")
+        policy_step = t - args.num_steps_wait + 1
+        print(f"step={policy_step} reward={reward:.3f} done={done} success={success}")
         if success or done:
+            if success:
+                message = f"[success] Task succeeded at policy step {policy_step} (reward={reward:.3f})."
+            else:
+                message = f"[done] Episode ended at policy step {policy_step} before success (reward={reward:.3f})."
+            print(message, flush=True)
+            patch_viewer.set_status(message)
+            if patch_viewer.root is not None and args.final_message_seconds > 0:
+                time.sleep(args.final_message_seconds)
             break
         if args.step_sleep > 0:
             time.sleep(args.step_sleep)

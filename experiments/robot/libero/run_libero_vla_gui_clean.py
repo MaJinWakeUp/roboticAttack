@@ -182,6 +182,13 @@ def check_unnorm_key(cfg, model):
         raise ValueError(f"Action un-norm key {cfg.unnorm_key} not found in VLA norm_stats.")
 
 
+def print_task_outcome(success, done, step_idx, reward):
+    if success:
+        print(f"[success] Task succeeded at policy step {step_idx} (reward={reward:.3f}).", flush=True)
+    elif done:
+        print(f"[done] Episode ended at policy step {step_idx} before success (reward={reward:.3f}).", flush=True)
+
+
 def run_policy(args, cfg, model, processor, env, task_suite, task_id, prompt):
     resize_size = get_image_resize_size(cfg)
     max_steps = args.max_steps if args.max_steps is not None else MAX_STEPS.get(args.task_suite_name, 520)
@@ -208,8 +215,10 @@ def run_policy(args, cfg, model, processor, env, task_suite, task_id, prompt):
         obs, reward, done, _ = env.step(action.tolist())
         render(env)
         success = env.check_success()
-        print(f"step={t - args.num_steps_wait + 1} reward={reward:.3f} done={done} success={success}")
+        policy_step = t - args.num_steps_wait + 1
+        print(f"step={policy_step} reward={reward:.3f} done={done} success={success}")
         if success or done:
+            print_task_outcome(success, done, policy_step, reward)
             break
         if args.step_sleep > 0:
             time.sleep(args.step_sleep)
