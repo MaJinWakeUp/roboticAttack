@@ -28,8 +28,10 @@ OPENVLA_V01_SYSTEM_PROMPT = (
 )
 
 
-def get_vla(cfg):
+def get_vla(cfg, device=None):
     """Loads and returns a VLA model from checkpoint."""
+    if device is None:
+        device = DEVICE
     # Load VLA checkpoint.
     print("[*] Instantiating Pretrained VLA model")
     print("[*] Loading in BF16 with Flash-Attention Enabled")
@@ -54,7 +56,7 @@ def get_vla(cfg):
     # Note: `.to()` is not supported for 8-bit or 4-bit bitsandbytes models, but the model will
     #       already be set to the right devices and casted to the correct dtype upon loading.
     if not cfg.load_in_8bit and not cfg.load_in_4bit:
-        vla = vla.to(DEVICE)
+        vla = vla.to(device)
 
     # Load dataset stats used during finetuning (for action un-normalization).
     dataset_statistics_path = os.path.join(cfg.pretrained_checkpoint, "dataset_statistics.json")
@@ -124,8 +126,10 @@ def crop_and_resize(image, crop_scale, batch_size):
     return image
 
 
-def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
+def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, device=None):
     """Generates an action with the VLA policy."""
+    if device is None:
+        device = DEVICE
     image = Image.fromarray(obs["full_image"])
     image = image.convert("RGB")
 
@@ -163,7 +167,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
 
     # Process inputs.
-    inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
+    inputs = processor(prompt, image).to(device, dtype=torch.bfloat16)
 
     # Get action.
     action = vla.predict_action(**inputs, unnorm_key=unnorm_key, do_sample=False)

@@ -40,7 +40,7 @@ class RandomPatchTransform:
             [0, 0, 1]
         ], dtype=np.float32)
         
-   def simulation_random_patch(self, image, patch, geometry=False,colorjitter=False,angle=1,shx=0.1,shy=0.1,position=(0,0)):
+    def simulation_random_patch(self, image, patch, geometry=False,colorjitter=False,angle=1,shx=0.1,shy=0.1,position=(0,0)):
         """
         random paste patch to images
 

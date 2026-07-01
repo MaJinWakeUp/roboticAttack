@@ -26,11 +26,12 @@ from typing import Optional, Union
 import draccus
 import numpy as np
 import tqdm
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "LIBERO"))
 from libero.libero import benchmark
 
 import wandb
 import sys
-sys.path.append("PATH TO/white_patch")
+sys.path.append(str(Path(__file__).resolve().parents[3] / "VLAAttacker" / "white_patch"))
 from appply_random_transform import RandomPatchTransform
 import torch
 import os
@@ -325,7 +326,7 @@ def parse_args():
     #################################################################################################################
     parser.add_argument("--run_id_note", type=str, default=f"test_libero_object", help="Extra note to add in run ID for logging")
     parser.add_argument("--local_log_dir", type=str, default="./experiments/logs", help="Local directory for eval logs")
-    parser.add_argument("--use_wandb", type=bool, default=True, help="Whether to also log results in Weights & Biases")
+    parser.add_argument("--use_wandb", type=bool, default=False, help="Whether to also log results in Weights & Biases")
     parser.add_argument("--wandb_project", type=str, default="LIBERO_simulation_test", help="Name of W&B project to log to (use default!)")
     parser.add_argument("--wandb_entity", type=str, default="taowen_wang-rit", help="Name of entity to log under")
     parser.add_argument("--seed", type=int, default=7, help="Random Seed (for reproducibility)")

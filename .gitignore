@@ -147,7 +147,11 @@ dmypy.json
 # Caches and Datasets
 cache/
 data/
+dataset/
 
 # Rollout videos and wandb logs
 rollouts/
 wandb/
+
+# LIBERO
+LIBERO/
