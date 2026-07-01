@@ -19,13 +19,12 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "LIBERO"))
 
 from libero.libero import benchmark, get_libero_path
-from libero.libero.envs.env_wrapper import ControlEnv
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--task_suite_name", default="libero_10")
-    parser.add_argument("--task_id", type=int, default=0)
+    parser.add_argument("--task_id", type=int, default=None)
     parser.add_argument("--init_state_id", type=int, default=0)
     parser.add_argument("--camera", default="agentview")
     parser.add_argument("--controller", default="OSC_POSE")
@@ -35,7 +34,47 @@ def parse_args():
     parser.add_argument("--rotation_scale", type=float, default=0.15)
     parser.add_argument("--gripper_hold", type=float, default=-1.0)
     parser.add_argument("--repeat_ms", type=int, default=80)
+    parser.add_argument("--list_tasks", action="store_true")
     return parser.parse_args()
+
+
+def list_tasks(task_suite):
+    for task_id in range(task_suite.n_tasks):
+        task = task_suite.get_task(task_id)
+        print(f"{task_id:2d}: {task.language}")
+
+
+def choose_task_id(task_suite, task_id):
+    if task_id is not None:
+        if task_id < 0 or task_id >= task_suite.n_tasks:
+            raise ValueError(f"task_id must be in [0, {task_suite.n_tasks - 1}]")
+        return task_id
+
+    list_tasks(task_suite)
+    while True:
+        choice = input("Select task id or search text> ").strip()
+        if choice.isdigit():
+            selected = int(choice)
+            if 0 <= selected < task_suite.n_tasks:
+                return selected
+            print(f"task_id must be in [0, {task_suite.n_tasks - 1}]")
+            continue
+
+        needle = choice.lower()
+        matches = [
+            (idx, task_suite.get_task(idx).language)
+            for idx in range(task_suite.n_tasks)
+            if needle and needle in task_suite.get_task(idx).language.lower()
+        ]
+        if len(matches) == 1:
+            print(f"Selected {matches[0][0]}: {matches[0][1]}")
+            return matches[0][0]
+        if matches:
+            for idx, language in matches:
+                print(f"{idx:2d}: {language}")
+            print("Multiple matches; enter one task id.")
+        else:
+            print("No match; enter a task id or a substring from the prompt.")
 
 
 def parse_robots(robots):
@@ -237,7 +276,15 @@ def main():
     args = parse_args()
     benchmark_dict = benchmark.get_benchmark_dict()
     task_suite = benchmark_dict[args.task_suite_name]()
+    if args.list_tasks:
+        list_tasks(task_suite)
+        return
+
+    task_id = choose_task_id(task_suite, args.task_id)
+    args.task_id = task_id
     task = task_suite.get_task(args.task_id)
+
+    from libero.libero.envs.env_wrapper import ControlEnv
 
     env = ControlEnv(
         bddl_file_name=get_bddl_file(task),

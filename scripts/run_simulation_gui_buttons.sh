@@ -20,7 +20,6 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
 fi
 
 TASK_SUITE="${TASK_SUITE:-libero_10}"
-TASK_ID="${TASK_ID:-0}"
 INIT_STATE_ID="${INIT_STATE_ID:-0}"
 CAMERA="${CAMERA:-agentview}"
 
@@ -29,9 +28,16 @@ if [[ "${USE_VGL:-1}" == "1" ]] && command -v vglrun >/dev/null 2>&1; then
     RUNNER=(vglrun -d egl python)
 fi
 
+ARGS=(
+    --task_suite_name "${TASK_SUITE}"
+    --init_state_id "${INIT_STATE_ID}"
+    --camera "${CAMERA}"
+)
+
+if [[ -n "${TASK_ID:-}" ]]; then
+    ARGS+=(--task_id "${TASK_ID}")
+fi
+
 "${RUNNER[@]}" experiments/robot/libero/run_libero_button_gui.py \
-    --task_suite_name "${TASK_SUITE}" \
-    --task_id "${TASK_ID}" \
-    --init_state_id "${INIT_STATE_ID}" \
-    --camera "${CAMERA}" \
+    "${ARGS[@]}" \
     "$@"
