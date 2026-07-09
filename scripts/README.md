@@ -1,4 +1,4 @@
-# GUI Simulation Scripts
+# GUI Robot Scripts
 
 Run these from the repo root inside a Palmetto Desktop session:
 
@@ -6,7 +6,7 @@ Run these from the repo root inside a Palmetto Desktop session:
 cd /home/jin7/projects/VLA/roboticAttack
 ```
 
-All GUI wrappers set `PYTHONPATH` for the local `LIBERO/` checkout, add conda CUDA/cuDNN library paths, and use `vglrun -d egl` when VirtualGL is available.
+The LIBERO GUI wrappers set `PYTHONPATH` for the local `LIBERO/` checkout, add conda CUDA/cuDNN library paths, and use `vglrun -d egl` when VirtualGL is available. The Bridge wrapper sets the repo `PYTHONPATH` and the same CUDA/cuDNN library paths, but does not use VirtualGL because it shows a Tk camera/control window instead of a MuJoCo viewer.
 
 ## Clean OpenVLA GUI
 
@@ -98,6 +98,48 @@ When the task succeeds, the attack runner prints a `[success]` line in the termi
 FINAL_MESSAGE_SECONDS=5 bash scripts/run_simulation_gui_vla_attack.sh
 ```
 
+## NutNet Attack OpenVLA GUI
+
+Runs the attack GUI with the NutNet DualMask defense from `0502tonylin/NutNet`. The preview window shows four panes: the patched observation with the final mask overlay, the gray-replaced image sent to OpenVLA, the coarse block mask, and the fine pixel mask.
+
+```bash
+bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+```
+
+By default, NutNet infers fresh masks for every attacked OpenVLA frame. The script uses the downloaded upstream autoencoder weights in `third_party/nutnet/ae_weights_`; with the default `NUTNET_BOX_NUM=32`, it uses `n_13.pth`. Detected pixels are replaced with gray, matching the NutNet defense behavior.
+
+```bash
+NUTNET_GRAY_VALUE=128 NUTNET_MASK_OVERLAY_ALPHA=0.45 \
+  bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+```
+
+The upstream-style thresholds are exposed as environment variables. The defaults follow the YOLOv4 wrapper in NutNet: coarse block reconstruction loss `0.2`, fine pixel reconstruction delta `0.25`, and input size `416`.
+
+```bash
+NUTNET_COARSE_THRESHOLD=0.2 NUTNET_FINE_THRESHOLD=0.25 \
+  bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+```
+
+Use a different NutNet scale or a custom weight file:
+
+```bash
+NUTNET_BOX_NUM=16 bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+NUTNET_AE_WEIGHTS=/path/to/n_13.pth bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+```
+
+If you want the older no-weight heuristic detector, set:
+
+```bash
+NUTNET_MODE=heuristic bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+```
+
+Use `NUTNET_REFRESH_INTERVAL` to control mask re-detection frequency. `1` means every frame, `20` means every 20 policy frames, and `0` restores the old first-frame mask reuse:
+
+```bash
+NUTNET_REFRESH_INTERVAL=20 bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+NUTNET_REFRESH_INTERVAL=0 bash scripts/run_simulation_gui_vla_attack_nutnet.sh
+```
+
 ## Manual Button GUI
 
 Opens the LIBERO simulator plus a button panel for manually moving the arm.
@@ -121,6 +163,110 @@ TASK_SUITE=libero_object TASK_ID=3 bash scripts/run_simulation_gui_buttons.sh
 Hold movement buttons to keep stepping. Release to stop. The panel includes translation, rotation, gripper, reset, and scale controls.
 
 When the task succeeds, the button panel changes to a `[success]` status message and the same message is printed in the terminal.
+
+## Bridge V2 Physical GUI
+
+Runs OpenVLA against the real-world Bridge V2 / WidowX environment with a Tk control window. This is not a MuJoCo simulator: the GUI shows the live camera image, the predicted action, episode controls, and manual nudge buttons for the physical robot.
+
+This script requires the physical Bridge/WidowX client package that provides `widowx_envs`. If it is not installed in the active environment, install or activate the robot-control environment first. If you already have a local checkout containing `widowx_envs`, point the wrapper at it:
+
+```bash
+WIDOWX_ENV_PATH=/path/to/checkout bash scripts/run_bridgev2_gui.sh
+```
+
+```bash
+bash scripts/run_bridgev2_gui.sh
+```
+
+Set the robot service endpoint and task prompt:
+
+```bash
+HOST_IP=localhost PORT=5556 TASK="put the carrot on the plate" \
+  bash scripts/run_bridgev2_gui.sh
+```
+
+Common Bridge options:
+
+```bash
+CHECKPOINT=openvla/openvla-7b CUDAID=0 DEVICE=cuda:0 bash scripts/run_bridgev2_gui.sh
+CAMERA_TOPIC=/blue/image_raw CONTROL_FREQUENCY=5 MAX_STEPS=60 bash scripts/run_bridgev2_gui.sh
+SAVE_DATA=1 SAVE_VIDEO=1 bash scripts/run_bridgev2_gui.sh
+```
+
+Tune the manual button step sizes:
+
+```bash
+MANUAL_TRANSLATION_STEP=0.005 MANUAL_ROTATION_STEP=0.025 MANUAL_GRIPPER=1.0 \
+  bash scripts/run_bridgev2_gui.sh
+```
+
+The Reset button calls the WidowX reset flow, which still asks for the start XYZ values in the terminal. Start runs the policy continuously, Step Once executes one OpenVLA action, Pause/Stop prevent further actions, and Mark Success/Mark Failure finish the episode manually. The manual nudge buttons send one Bridge-format action per click: `[dx, dy, dz, droll, dpitch, dyaw, open_gripper]`, where `open_gripper=1` and `close_gripper=0`. Bridge has no automatic `env.check_success()` signal.
+
+## OpenVLA GPU Server + LeRobot Client
+
+Runs OpenVLA on a GPU server and lets a separate client machine send OpenCV camera frames and receive 7-DoF OpenVLA actions. The action returned by the server is `[x, y, z, roll, pitch, yaw, gripper]`.
+
+On the GPU server:
+
+```bash
+SERVER_CONDA_ENV=roboticAttack HOST=127.0.0.1 PORT=8000 CUDAID=0 CHECKPOINT=openvla/openvla-7b \
+  bash scripts/run_openvla_server.sh
+```
+
+`SERVER_CONDA_ENV` defaults to `roboticAttack`, so you can omit it in normal use. Set `SERVER_CONDA_ENV=` only if you have already activated the right environment and want the wrapper to skip conda activation.
+
+From the client, use SSH port forwarding. The client starts `ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 ...` and then talks to `http://127.0.0.1:18000`, so the OpenVLA server never needs to bind to a public interface:
+
+```bash
+TASK="put the carrot on the plate" SSH_TUNNEL_HOST=user@gpu-host.example.edu \
+  SSH_LOCAL_PORT=18000 SSH_REMOTE_PORT=8000 CAMERA_INDEX=0 STEPS=10 \
+  bash scripts/run_lerobot_openvla_client.sh
+```
+
+If the GPU host is only reachable through a login/bastion host, add `SSH_TUNNEL_JUMP`:
+
+```bash
+TASK="put the carrot on the plate" SSH_TUNNEL_HOST=user@gpu-compute-node \
+  SSH_TUNNEL_JUMP=user@login.example.edu SSH_LOCAL_PORT=18000 SSH_REMOTE_PORT=8000 \
+  bash scripts/run_lerobot_openvla_client.sh
+```
+
+Equivalently, you can create the tunnel yourself in one terminal:
+
+```bash
+ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 user@gpu-host.example.edu
+```
+
+Then point the client at the local forwarded port:
+
+```bash
+TASK="put the carrot on the plate" SERVER_URL=http://127.0.0.1:18000 CAMERA_INDEX=0 STEPS=10 \
+  bash scripts/run_lerobot_openvla_client.sh
+```
+
+To command a LeRobot SO-100 end-effector robot, pass `EXECUTE=1`. This maps OpenVLA indexes `0,1,2,6` to LeRobot keys `delta_x,delta_y,delta_z,gripper` and converts OpenVLA gripper values from `[0,1]` to SO-100 end-effector `[0,2]`:
+
+```bash
+TASK="put the carrot on the plate" SSH_TUNNEL_HOST=user@gpu-host.example.edu \
+  ROBOT_TYPE=so100_follower_end_effector ROBOT_PORT=/dev/ttyACM0 \
+  URDF_PATH=/path/to/so101_new_calib.urdf EXECUTE=1 \
+  bash scripts/run_lerobot_openvla_client.sh
+```
+
+For other LeRobot robots, provide an explicit action map before using `EXECUTE=1`:
+
+```bash
+ACTION_KEYS=joint_1.pos,joint_2.pos,joint_3.pos ACTION_INDEXES=0,1,2 ACTION_SCALES=1,1,1 \
+  ROBOT_TYPE=custom ROBOT_CLASS_PATH=my_robot_pkg:MyRobot ROBOT_CONFIG_CLASS_PATH=my_robot_pkg:MyRobotConfig \
+  ROBOT_CONFIG_PATH=/path/to/robot_config.json EXECUTE=1 \
+  TASK="open the drawer" SSH_TUNNEL_HOST=user@gpu-host.example.edu bash scripts/run_lerobot_openvla_client.sh
+```
+
+Use `MAX_ACTION_ABS` while testing to clip unexpected action values:
+
+```bash
+MAX_ACTION_ABS=0.05 EXECUTE=1 bash scripts/run_lerobot_openvla_client.sh
+```
 
 ## Common Options
 
