@@ -270,12 +270,12 @@ MAX_ACTION_ABS=0.05 EXECUTE=1 bash scripts/run_lerobot_openvla_client.sh
 
 ## SmolVLA SO-101 GPU Server + Client
 
-The default SmolVLA checkpoint is `Sa74ll/smolvla_so101_pickandplace`, a fine-tuned SO-101 pick-and-place policy. It takes a 6-value state, produces a 6-value joint-target action, and defines `camera1`, `camera2`, and `camera3` inputs. Its published inference example maps the training `up` and `side` views to `camera1` and `camera2`; the third view is optional in the client. The linked dataset metadata labels the robot type `so100_follower`, even though its six joint names and order match SO-101, so verify calibration and use dry runs before enabling motion.
+The default SmolVLA checkpoint is `stepdc/stack_cube_1_smolvla_l20`, a fine-tuned stack-cube policy. It takes a 6-value state, produces a 6-value joint-target action, and requires two 640×480 RGB inputs: `side` and `front`. The server accepts either short names (`side`, `front`) or full LeRobot feature names (`observation.images.side`, `observation.images.front`), but it requires both for each prediction. The SO-101 wrapper maps `CAMERA1_INDEX` to `side` and `CAMERA2_INDEX` to `front` by default; override `CAMERA1_KEY`/`CAMERA2_KEY` for another checkpoint. Verify calibration, camera placement, and task wording with a dry run before enabling motion.
 
 Install LeRobot and the SmolVLA extra once in the GPU server's `roboticAttack` environment. Use the same LeRobot revision as the client when possible:
 
 ```bash
-conda activate roboticAttack
+conda activate lerobot
 pip install "lerobot[smolvla]"
 ```
 
@@ -283,19 +283,18 @@ Start the separate server. On Palmetto, set an API key and bind to `0.0.0.0` so 
 
 ```bash
 HOST=0.0.0.0 PORT=8000 CUDAID=0 SMOLVLA_API_KEY='choose-a-secret' \
-  CHECKPOINT=Sa74ll/smolvla_so101_pickandplace bash scripts/run_smolvla_server.sh
+  CHECKPOINT=stepdc/stack_cube_1_smolvla_l20 bash scripts/run_smolvla_server.sh
 ```
 
 The server exposes `GET /health`, `POST /predict`, and `POST /reset`. A prediction request must contain `task` and `state`; it accepts all three preferred views through `images`, where camera names can be short (`camera1`) or full LeRobot feature names. Add `"return_action_chunk": true` to receive the checkpoint's 50 predicted joint targets in `action_chunk` as well as the first target in `action`:
 
 ```json
 {
-  "task": "put the block in the box",
+  "task": "stack the cube",
   "state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
   "images": {
-    "camera1": "<base64 JPEG>",
-    "camera2": "<base64 JPEG>",
-    "camera3": "<base64 JPEG>"
+    "side": "<base64 JPEG>",
+    "front": "<base64 JPEG>"
   },
   "session_id": "so101-demo-1",
   "return_action_chunk": true
@@ -305,7 +304,7 @@ The server exposes `GET /health`, `POST /predict`, and `POST /reset`. A predicti
 The SO-101 client reads the six joint positions from `SO101Follower.get_observation()`, captures the configured OpenCV views, and maps the returned action directly to `shoulder_pan.pos`, `shoulder_lift.pos`, `elbow_flex.pos`, `wrist_flex.pos`, `wrist_roll.pos`, and `gripper.pos`. By default it requests a 50-action chunk and plays it at 30 Hz, matching the training dataset frame rate without streaming images across SSH every control step. Run a one-step dry run first; this connects and observes but does not command the arm:
 
 ```bash
-TASK="pick up the cube" SERVER_URL=http://127.0.0.1:18000 SMOLVLA_API_KEY='choose-a-secret' \
+TASK="stack the cube" SERVER_URL=http://127.0.0.1:18000 SMOLVLA_API_KEY='choose-a-secret' \
   ROBOT_PORT=/dev/ttyACM0 CAMERA1_INDEX=0 CAMERA2_INDEX=1 STEPS=1 \
   bash scripts/run_lerobot_smolvla_so101_client.sh
 ```
@@ -315,7 +314,7 @@ Use the exact task wording and camera placement used for the checkpoint's demons
 For Palmetto, the client can create the supported login-node tunnel automatically. Replace `node0279` with the compute-node hostname allocated to the server:
 
 ```bash
-TASK="pick up the cube" ROBOT_PORT=/dev/ttyACM0 CAMERA1_INDEX=0 CAMERA2_INDEX=1 \
+TASK="stack the cube" ROBOT_PORT=/dev/ttyACM0 CAMERA1_INDEX=0 CAMERA2_INDEX=1 \
   SMOLVLA_API_KEY='choose-a-secret' SSH_TUNNEL_HOST=jin7@slogin.palmetto.clemson.edu \
   SSH_REMOTE_HOST=node0279 SSH_REMOTE_PORT=8000 SSH_LOCAL_PORT=18000 STEPS=1 \
   bash scripts/run_lerobot_smolvla_so101_client.sh

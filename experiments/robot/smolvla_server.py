@@ -19,9 +19,11 @@ Request body::
       "session_id": "robot-session-1"
     }
 
-For a single camera, ``image_b64`` is accepted and is mapped to ``camera1`` by
-default. The default SO-101 checkpoint's published inference example uses two
-views (``camera1`` and ``camera2``), so provide both whenever possible.
+For a one-camera checkpoint, ``image_b64`` is also accepted. Multi-camera
+checkpoints must receive every image feature declared in their configuration.
+For example, ``stepdc/stack_cube_1_smolvla_l20`` requires the ``side`` and
+``front`` views (``observation.images.side`` and
+``observation.images.front``).
 """
 
 import argparse
@@ -52,13 +54,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=int(os.environ.get("SMOLVLA_PORT", "8000")))
     parser.add_argument(
         "--checkpoint",
-        default=os.environ.get("CHECKPOINT", "Sa74ll/smolvla_so101_pickandplace"),
+        default=os.environ.get("CHECKPOINT", "stepdc/stack_cube_1_smolvla_l20"),
     )
     parser.add_argument("--device", default=os.environ.get("DEVICE", "cuda:0"))
     parser.add_argument(
         "--single_image_key",
-        default=os.environ.get("SINGLE_IMAGE_KEY", "observation.images.camera1"),
-        help="Configured image feature used when a request supplies image_b64 instead of images.",
+        default=os.environ.get("SINGLE_IMAGE_KEY") or None,
+        help=(
+            "Configured image feature used when a request supplies image_b64 instead of images. "
+            "Defaults automatically for one-camera checkpoints; multi-camera checkpoints require images."
+        ),
     )
     parser.add_argument("--api_key", default=os.environ.get("SMOLVLA_API_KEY", ""))
     parser.add_argument("--max_request_bytes", type=int, default=32 * 1024 * 1024)
@@ -66,10 +71,36 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def legacy_checkpoint_normalization_stats(checkpoint: str) -> Dict[str, Dict[str, Any]]:
+    """Read normalization buffers embedded by pre-processor-era LeRobot checkpoints."""
+    from huggingface_hub import hf_hub_download
+    from safetensors import safe_open
+
+    model_file = os.path.join(checkpoint, "model.safetensors") if os.path.isdir(checkpoint) else hf_hub_download(
+        checkpoint, "model.safetensors"
+    )
+    tensor_keys = {
+        OBS_STATE: "normalize_inputs.buffer_observation_state",
+        "action": "normalize_targets.buffer_action",
+    }
+    stats: Dict[str, Dict[str, Any]] = {}
+    with safe_open(model_file, framework="pt", device="cpu") as weights:
+        for feature, prefix in tensor_keys.items():
+            mean_key, std_key = f"{prefix}.mean", f"{prefix}.std"
+            if mean_key not in weights.keys() or std_key not in weights.keys():
+                raise FileNotFoundError(
+                    "Checkpoint has neither processor configuration nor legacy normalization buffers "
+                    f"for {feature!r}."
+                )
+            stats[feature] = {"mean": weights.get_tensor(mean_key), "std": weights.get_tensor(std_key)}
+    return stats
+
+
 def load_policy(args: argparse.Namespace) -> tuple[Any, Any, Any, Any]:
     """Load the policy and its checkpoint-specific pre/post-processors lazily."""
     try:
         import torch
+        from lerobot.configs.policies import PreTrainedConfig
         from lerobot.policies.factory import make_pre_post_processors
         from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
     except ImportError as exc:
@@ -82,12 +113,27 @@ def load_policy(args: argparse.Namespace) -> tuple[Any, Any, Any, Any]:
         raise RuntimeError(f"Requested {args.device}, but CUDA is not available.")
 
     LOGGER.info("Loading SmolVLA policy from %s", args.checkpoint)
-    policy = SmolVLAPolicy.from_pretrained(args.checkpoint).to(args.device).eval()
-    preprocess, postprocess = make_pre_post_processors(
-        policy.config,
-        args.checkpoint,
-        preprocessor_overrides={"device_processor": {"device": args.device}},
-    )
+    # ``from_pretrained`` deserializes weights onto ``config.device``. Set it
+    # before loading, rather than calling ``.to`` afterwards, so --device is
+    # honored for CPU smoke tests as well as CUDA servers.
+    # The base config loader reads the checkpoint's ``type`` discriminator and
+    # instantiates the matching SmolVLA config class.
+    config = PreTrainedConfig.from_pretrained(args.checkpoint)
+    config.device = args.device
+    policy = SmolVLAPolicy.from_pretrained(args.checkpoint, config=config).eval()
+    try:
+        preprocess, postprocess = make_pre_post_processors(
+            policy.config,
+            args.checkpoint,
+            preprocessor_overrides={"device_processor": {"device": args.device}},
+        )
+    except FileNotFoundError as exc:
+        # Older LeRobot checkpoints stored normalization in model.safetensors
+        # rather than policy_{pre,post}processor.json. The requested stack-cube
+        # checkpoint has this layout.
+        stats = legacy_checkpoint_normalization_stats(args.checkpoint)
+        LOGGER.warning("%s; building compatible SmolVLA processors from checkpoint normalization buffers.", exc)
+        preprocess, postprocess = make_pre_post_processors(policy.config, dataset_stats=stats)
     return policy, preprocess, postprocess, torch
 
 
@@ -143,7 +189,7 @@ class SmolVLARuntime:
     device: str
     state_dim: int
     image_keys: List[str]
-    single_image_key: str
+    single_image_key: Optional[str]
     lock: threading.Lock
     active_session_id: Optional[str] = None
 
@@ -179,9 +225,18 @@ class SmolVLARuntime:
             encoded = payload.get("image_b64") or payload.get("image")
             if not encoded:
                 raise ValueError("missing_images: provide images or image_b64.")
-            decoded_images[self.resolve_image_key(str(payload.get("image_key", self.single_image_key)))] = decode_image(
-                str(encoded)
-            )
+            image_key = payload.get("image_key", self.single_image_key)
+            if image_key is None:
+                expected = ", ".join(self.image_keys)
+                raise ValueError(
+                    "image_b64 is only unambiguous for one-camera checkpoints; "
+                    f"provide images for all required features: {expected}"
+                )
+            decoded_images[self.resolve_image_key(str(image_key))] = decode_image(str(encoded))
+
+        missing_image_keys = sorted(set(self.image_keys) - set(decoded_images))
+        if missing_image_keys:
+            raise ValueError(f"missing_images: provide base64 images for: {', '.join(missing_image_keys)}")
 
         observation: Dict[str, Any] = {
             OBS_STATE: self.torch_module.from_numpy(state),
@@ -335,7 +390,10 @@ def main() -> None:
         single_image_key=args.single_image_key,
         lock=threading.Lock(),
     )
-    runtime.resolve_image_key(runtime.single_image_key)
+    if runtime.single_image_key is None and len(runtime.image_keys) == 1:
+        runtime.single_image_key = runtime.image_keys[0]
+    if runtime.single_image_key is not None:
+        runtime.resolve_image_key(runtime.single_image_key)
 
     server = ThreadingHTTPServer((args.host, args.port), SmolVLARequestHandler)
     server.runtime = runtime  # type: ignore[attr-defined]

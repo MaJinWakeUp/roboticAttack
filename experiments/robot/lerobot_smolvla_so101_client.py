@@ -6,9 +6,10 @@ captures one to three OpenCV cameras, sends them to ``smolvla_server.py``, and
 optionally sends the returned six joint targets to the follower arm. Execution
 is opt-in; start with the default observe-only mode.
 
-The default camera mapping matches ``Sa74ll/smolvla_so101_pickandplace``:
-``camera1`` is the training ``up`` camera and ``camera2`` is the training
-``side`` camera. A third camera is optional.
+The default camera mapping matches ``stepdc/stack_cube_1_smolvla_l20``:
+the first local camera is sent as the training ``side`` view and the second as
+the training ``front`` view. Override the feature keys when using a checkpoint
+with a different camera schema.
 """
 
 import argparse
@@ -23,7 +24,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import numpy as np
 
@@ -47,9 +48,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--session_id", default="")
 
-    parser.add_argument("--camera1_index", required=True, help="Training 'up' camera index or path.")
-    parser.add_argument("--camera2_index", default="", help="Optional training 'side' camera index or path.")
+    parser.add_argument("--camera1_index", required=True, help="Training 'side' camera index or path.")
+    parser.add_argument("--camera2_index", default="", help="Training 'front' camera index or path.")
     parser.add_argument("--camera3_index", default="", help="Optional third camera index or path.")
+    parser.add_argument(
+        "--camera1_key",
+        default="side",
+        help="Checkpoint image feature name for camera1 (default: side).",
+    )
+    parser.add_argument(
+        "--camera2_key",
+        default="front",
+        help="Checkpoint image feature name for camera2 (default: front).",
+    )
+    parser.add_argument(
+        "--camera3_key",
+        default="",
+        help="Checkpoint image feature name for camera3; required when camera3 is configured.",
+    )
     parser.add_argument("--camera_width", type=int, default=640)
     parser.add_argument("--camera_height", type=int, default=480)
     parser.add_argument("--camera_fps", type=float, default=30.0)
@@ -156,6 +172,22 @@ def make_cameras(args: argparse.Namespace) -> Dict[str, OpenCVCamera]:
         for name, value in requested.items()
         if value
     }
+
+
+def camera_feature_keys(args: argparse.Namespace, cameras: Mapping[str, OpenCVCamera]) -> Dict[str, str]:
+    """Map local camera slots to the checkpoint's short LeRobot feature names."""
+    requested = {
+        "camera1": args.camera1_key,
+        "camera2": args.camera2_key,
+        "camera3": args.camera3_key,
+    }
+    keys = {name: requested[name].strip() for name in cameras}
+    missing = [name for name, key in keys.items() if not key]
+    if missing:
+        raise ValueError(f"Missing checkpoint image feature key for: {', '.join(missing)}")
+    if len(set(keys.values())) != len(keys):
+        raise ValueError("Each configured camera must use a distinct checkpoint image feature key.")
+    return keys
 
 
 def build_ssh_destination(args: argparse.Namespace) -> str:
@@ -280,6 +312,45 @@ def post_predict(
         raise RuntimeError(f"Server returned HTTP {exc.code}: {error_body}") from exc
 
 
+def get_server_health(args: argparse.Namespace) -> Dict[str, Any]:
+    headers = {"X-API-Key": args.api_key} if args.api_key else {}
+    request = urllib.request.Request(args.server_url.rstrip("/") + "/health", headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=args.timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Server health check returned HTTP {exc.code}: {error_body}") from exc
+    if not isinstance(payload, dict) or not payload.get("ok", False):
+        raise RuntimeError(f"Server health check failed: {payload}")
+    return payload
+
+
+def validate_server_schema(feature_keys: Mapping[str, str], health: Mapping[str, Any]) -> None:
+    """Fail before connecting to the arm when local camera/model schemas disagree."""
+    if int(health.get("state_dim", -1)) != len(SO101_JOINT_KEYS):
+        raise ValueError(
+            f"Server expects state_dim={health.get('state_dim')}; this SO-101 client requires "
+            f"{len(SO101_JOINT_KEYS)} joint values."
+        )
+    expected_images = {str(key) for key in health.get("image_keys", [])}
+    supplied_images = {
+        key if key.startswith("observation.images.") else f"observation.images.{key}"
+        for key in feature_keys.values()
+    }
+    if supplied_images != expected_images:
+        raise ValueError(
+            "Configured camera feature keys do not match the server checkpoint. "
+            f"Server requires: {', '.join(sorted(expected_images))}; "
+            f"client supplies: {', '.join(sorted(supplied_images))}."
+        )
+    if int(health.get("action_dim", -1)) != len(SO101_JOINT_KEYS):
+        raise ValueError(
+            f"Server returns action_dim={health.get('action_dim')}; this SO-101 client requires "
+            f"{len(SO101_JOINT_KEYS)} joint targets."
+        )
+
+
 def maybe_confirm_execution(args: argparse.Namespace) -> None:
     if not args.execute or not args.confirm:
         return
@@ -302,12 +373,16 @@ def main() -> None:
     args = parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level.upper()), format="[%(asctime)s] %(levelname)s: %(message)s")
     cameras = make_cameras(args)
+    feature_keys = camera_feature_keys(args, cameras)
     robot = None
     tunnel_process = None
     log_f = None
     session_id = args.session_id or str(uuid.uuid4())
     try:
         tunnel_process = start_ssh_tunnel(args)
+        health = get_server_health(args)
+        validate_server_schema(feature_keys, health)
+        LOGGER.info("Validated server checkpoint %s.", health.get("checkpoint", "unknown"))
         robot = connect_robot(args)
         for camera in cameras.values():
             camera.connect(args.warmup_frames)
@@ -329,7 +404,7 @@ def main() -> None:
             if not pending_actions:
                 for name, camera in cameras.items():
                     encoded, frame = camera.read_jpeg()
-                    image_bytes[name] = encoded
+                    image_bytes[feature_keys[name]] = encoded
                     if name == "camera1":
                         camera1_frame = frame
                 request_id = str(uuid.uuid4())

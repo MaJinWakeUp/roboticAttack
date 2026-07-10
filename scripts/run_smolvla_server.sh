@@ -41,10 +41,11 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
 fi
 
 CUDAID="${CUDAID:-0}"
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 DEVICE="${DEVICE:-cuda:0}"
-CHECKPOINT="${CHECKPOINT:-Sa74ll/smolvla_so101_pickandplace}"
+CHECKPOINT="${CHECKPOINT:-stepdc/stack_cube_1_smolvla_l20}"
+# This checkpoint requires observation.images.side and observation.images.front.
 
 ARGS=(
     --host "${HOST}"
