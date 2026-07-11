@@ -44,8 +44,8 @@ CUDAID="${CUDAID:-0}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 DEVICE="${DEVICE:-cuda:0}"
-CHECKPOINT="${CHECKPOINT:-stepdc/stack_cube_1_smolvla_l20}"
-# This checkpoint requires observation.images.side and observation.images.front.
+CHECKPOINT="${CHECKPOINT:-majinwakeup30/smolvla_so100_stack_cube_v1}"
+# This one-camera checkpoint uses observation.images.camera1 for the front view.
 
 ARGS=(
     --host "${HOST}"

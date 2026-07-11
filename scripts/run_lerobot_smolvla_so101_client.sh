@@ -39,14 +39,10 @@ ARGS=(
 if [[ -n "${SMOLVLA_API_KEY:-}" ]]; then ARGS+=(--api_key "${SMOLVLA_API_KEY}"); fi
 if [[ -n "${CAMERA2_INDEX:-}" ]]; then ARGS+=(--camera2_index "${CAMERA2_INDEX}"); fi
 if [[ -n "${CAMERA3_INDEX:-}" ]]; then ARGS+=(--camera3_index "${CAMERA3_INDEX}"); fi
-ARGS+=(--camera1_key "${CAMERA1_KEY:-side}")
-if [[ -n "${CAMERA2_INDEX:-}" ]]; then ARGS+=(--camera2_key "${CAMERA2_KEY:-front}"); fi
+ARGS+=(--camera1_key "${CAMERA1_KEY:-camera1}")
+if [[ -n "${CAMERA2_INDEX:-}" ]]; then ARGS+=(--camera2_key "${CAMERA2_KEY:-camera2}"); fi
 if [[ -n "${CAMERA3_INDEX:-}" ]]; then
-    if [[ -z "${CAMERA3_KEY:-}" ]]; then
-        echo "Set CAMERA3_KEY when CAMERA3_INDEX is configured." >&2
-        exit 1
-    fi
-    ARGS+=(--camera3_key "${CAMERA3_KEY}")
+    ARGS+=(--camera3_key "${CAMERA3_KEY:-camera3}")
 fi
 if [[ -n "${ROBOT_ID:-}" ]]; then ARGS+=(--robot_id "${ROBOT_ID}"); fi
 if [[ -n "${MAX_ACTION_ABS:-}" ]]; then ARGS+=(--max_action_abs "${MAX_ACTION_ABS}"); fi

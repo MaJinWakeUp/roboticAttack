@@ -6,10 +6,9 @@ captures one to three OpenCV cameras, sends them to ``smolvla_server.py``, and
 optionally sends the returned six joint targets to the follower arm. Execution
 is opt-in; start with the default observe-only mode.
 
-The default camera mapping matches ``stepdc/stack_cube_1_smolvla_l20``:
-the first local camera is sent as the training ``side`` view and the second as
-the training ``front`` view. Override the feature keys when using a checkpoint
-with a different camera schema.
+The default camera mapping matches ``majinwakeup30/smolvla_so100_stack_cube_v1``:
+the one local front camera is sent as ``camera1``. Additional cameras remain
+available for checkpoints that use them.
 """
 
 import argparse
@@ -48,23 +47,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--session_id", default="")
 
-    parser.add_argument("--camera1_index", required=True, help="Training 'side' camera index or path.")
-    parser.add_argument("--camera2_index", default="", help="Training 'front' camera index or path.")
+    parser.add_argument("--camera1_index", required=True, help="Training front-camera index or path.")
+    parser.add_argument("--camera2_index", default="", help="Optional second camera index or path.")
     parser.add_argument("--camera3_index", default="", help="Optional third camera index or path.")
     parser.add_argument(
         "--camera1_key",
-        default="side",
-        help="Checkpoint image feature name for camera1 (default: side).",
+        default="camera1",
+        help="Checkpoint image feature name for camera1 (default: camera1).",
     )
     parser.add_argument(
         "--camera2_key",
-        default="front",
-        help="Checkpoint image feature name for camera2 (default: front).",
+        default="camera2",
+        help="Checkpoint image feature name for camera2 (default: camera2).",
     )
     parser.add_argument(
         "--camera3_key",
-        default="",
-        help="Checkpoint image feature name for camera3; required when camera3 is configured.",
+        default="camera3",
+        help="Checkpoint image feature name for camera3 (default: camera3).",
     )
     parser.add_argument("--camera_width", type=int, default=640)
     parser.add_argument("--camera_height", type=int, default=480)
@@ -338,11 +337,12 @@ def validate_server_schema(feature_keys: Mapping[str, str], health: Mapping[str,
         key if key.startswith("observation.images.") else f"observation.images.{key}"
         for key in feature_keys.values()
     }
-    if supplied_images != expected_images:
+    unsupported_images = supplied_images - expected_images
+    if unsupported_images:
         raise ValueError(
-            "Configured camera feature keys do not match the server checkpoint. "
-            f"Server requires: {', '.join(sorted(expected_images))}; "
-            f"client supplies: {', '.join(sorted(supplied_images))}."
+            "Configured camera feature keys are not supported by the server checkpoint. "
+            f"Server supports: {', '.join(sorted(expected_images))}; "
+            f"client supplies unsupported: {', '.join(sorted(unsupported_images))}."
         )
     if int(health.get("action_dim", -1)) != len(SO101_JOINT_KEYS):
         raise ValueError(

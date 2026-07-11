@@ -19,11 +19,13 @@ Request body::
       "session_id": "robot-session-1"
     }
 
-For a one-camera checkpoint, ``image_b64`` is also accepted. Multi-camera
-checkpoints must receive every image feature declared in their configuration.
-For example, ``stepdc/stack_cube_1_smolvla_l20`` requires the ``side`` and
-``front`` views (``observation.images.side`` and
-``observation.images.front``).
+For a one-camera checkpoint, ``image_b64`` is also accepted. A request must
+include at least one image feature declared in the checkpoint configuration;
+SmolVLA supports a subset of its configured cameras when the checkpoint was
+trained that way.
+For example, ``majinwakeup30/smolvla_so100_stack_cube_v1`` was trained with
+one front view, exposed by its saved processor as ``camera1``
+(``observation.images.camera1``).
 """
 
 import argparse
@@ -54,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=int(os.environ.get("SMOLVLA_PORT", "8000")))
     parser.add_argument(
         "--checkpoint",
-        default=os.environ.get("CHECKPOINT", "stepdc/stack_cube_1_smolvla_l20"),
+        default=os.environ.get("CHECKPOINT", "majinwakeup30/smolvla_so100_stack_cube_v1"),
     )
     parser.add_argument("--device", default=os.environ.get("DEVICE", "cuda:0"))
     parser.add_argument(
@@ -234,9 +236,8 @@ class SmolVLARuntime:
                 )
             decoded_images[self.resolve_image_key(str(image_key))] = decode_image(str(encoded))
 
-        missing_image_keys = sorted(set(self.image_keys) - set(decoded_images))
-        if missing_image_keys:
-            raise ValueError(f"missing_images: provide base64 images for: {', '.join(missing_image_keys)}")
+        if not decoded_images:
+            raise ValueError("missing_images: provide at least one base64 image.")
 
         observation: Dict[str, Any] = {
             OBS_STATE: self.torch_module.from_numpy(state),
