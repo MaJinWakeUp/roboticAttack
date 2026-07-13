@@ -193,6 +193,7 @@ class SmolVLARuntime:
     image_keys: List[str]
     single_image_key: Optional[str]
     lock: threading.Lock
+    model_type: str = "smolvla"
     active_session_id: Optional[str] = None
 
     def resolve_image_key(self, key: str) -> str:
@@ -301,7 +302,7 @@ class SmolVLARequestHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             {
                 "ok": True,
-                "model_type": "smolvla",
+                "model_type": runtime.model_type,
                 "checkpoint": runtime.checkpoint,
                 "device": runtime.device,
                 "state_key": OBS_STATE,

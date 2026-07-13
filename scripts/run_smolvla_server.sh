@@ -44,7 +44,7 @@ CUDAID="${CUDAID:-0}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 DEVICE="${DEVICE:-cuda:0}"
-CHECKPOINT="${CHECKPOINT:-majinwakeup30/smolvla_so100_stack_cube_v1}"
+CHECKPOINT="${CHECKPOINT:-majinwakeup30/smolvla_so100_stack_cube_merged}"
 # This one-camera checkpoint uses observation.images.camera1 for the front view.
 
 ARGS=(

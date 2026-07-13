@@ -39,21 +39,30 @@ SO101_JOINT_KEYS = [
 ]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+def parse_args(
+    description: Optional[str] = None,
+    default_model_name: str = "SmolVLA",
+    default_robot_id: str = "smolvla_so101_client",
+    expected_model_type: str = "",
+    default_camera1_key: str = "camera1",
+    default_action_chunk_steps: int = 0,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=description or __doc__)
     parser.add_argument("--server_url", default="http://127.0.0.1:8000")
     parser.add_argument("--api_key", default="")
     parser.add_argument("--task", required=True)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--session_id", default="")
+    parser.add_argument("--model_name", default=default_model_name, help=argparse.SUPPRESS)
+    parser.add_argument("--expected_model_type", default=expected_model_type, help=argparse.SUPPRESS)
 
     parser.add_argument("--camera1_index", required=True, help="Training front-camera index or path.")
     parser.add_argument("--camera2_index", default="", help="Optional second camera index or path.")
     parser.add_argument("--camera3_index", default="", help="Optional third camera index or path.")
     parser.add_argument(
         "--camera1_key",
-        default="camera1",
-        help="Checkpoint image feature name for camera1 (default: camera1).",
+        default=default_camera1_key,
+        help=f"Checkpoint image feature name for camera1 (default: {default_camera1_key}).",
     )
     parser.add_argument(
         "--camera2_key",
@@ -73,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preview", action="store_true")
 
     parser.add_argument("--robot_port", required=True)
-    parser.add_argument("--robot_id", default="smolvla_so101_client")
+    parser.add_argument("--robot_id", default=default_robot_id)
     parser.add_argument(
         "--max_relative_target",
         type=int,
@@ -93,6 +102,12 @@ def parse_args() -> argparse.Namespace:
         dest="use_action_chunk",
         action="store_false",
         help="Request one action per HTTP call instead of the policy's native action chunks.",
+    )
+    parser.add_argument(
+        "--action_chunk_steps",
+        type=int,
+        default=default_action_chunk_steps,
+        help="Maximum actions consumed from each returned chunk; 0 uses the complete chunk.",
     )
     parser.add_argument("--save_jsonl", default="")
     parser.add_argument("--log_level", default="INFO")
@@ -251,7 +266,12 @@ def stop_ssh_tunnel(process: Optional[subprocess.Popen]) -> None:
 
 
 def connect_robot(args: argparse.Namespace) -> Any:
-    from lerobot.robots.so101_follower import SO101Follower, SO101FollowerConfig
+    try:
+        # LeRobot >= 0.6 uses the generic SO-100/SO-101 implementation.
+        from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
+    except ImportError:
+        # Compatibility with older LeRobot releases.
+        from lerobot.robots.so101_follower import SO101Follower, SO101FollowerConfig
 
     config = SO101FollowerConfig(
         port=args.robot_port,
@@ -325,8 +345,14 @@ def get_server_health(args: argparse.Namespace) -> Dict[str, Any]:
     return payload
 
 
-def validate_server_schema(feature_keys: Mapping[str, str], health: Mapping[str, Any]) -> None:
+def validate_server_schema(
+    feature_keys: Mapping[str, str], health: Mapping[str, Any], expected_model_type: str = ""
+) -> None:
     """Fail before connecting to the arm when local camera/model schemas disagree."""
+    if expected_model_type and str(health.get("model_type", "")) != expected_model_type:
+        raise ValueError(
+            f"Server model_type={health.get('model_type')!r}; expected {expected_model_type!r}."
+        )
     if int(health.get("state_dim", -1)) != len(SO101_JOINT_KEYS):
         raise ValueError(
             f"Server expects state_dim={health.get('state_dim')}; this SO-101 client requires "
@@ -354,23 +380,41 @@ def validate_server_schema(feature_keys: Mapping[str, str], health: Mapping[str,
 def maybe_confirm_execution(args: argparse.Namespace) -> None:
     if not args.execute or not args.confirm:
         return
-    print("\nAbout to send SmolVLA joint targets to the SO-101 follower arm.")
+    print(f"\nAbout to send {args.model_name} joint targets to the SO-101 follower arm.")
     print("Check that the arm is clear and that its calibration matches the model's training setup.")
     input("Press Enter to start, or Ctrl-C to abort...")
 
 
-def show_preview(cameras: Dict[str, OpenCVCamera], frame: np.ndarray, action: np.ndarray) -> bool:
+def show_preview(
+    cameras: Dict[str, OpenCVCamera], frame: np.ndarray, action: np.ndarray, model_name: str
+) -> bool:
     camera = cameras["camera1"]
     if camera.cv2 is None:
         return True
     label = np.array2string(np.round(action, 2), precision=2, separator=", ")
     camera.cv2.putText(frame, label[:110], (10, 28), camera.cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1)
-    camera.cv2.imshow("SmolVLA SO-101 camera1", frame)
+    camera.cv2.imshow(f"{model_name} SO-101 camera1", frame)
     return camera.cv2.waitKey(1) & 0xFF != ord("q")
 
 
-def main() -> None:
-    args = parse_args()
+def main(
+    description: Optional[str] = None,
+    default_model_name: str = "SmolVLA",
+    default_robot_id: str = "smolvla_so101_client",
+    expected_model_type: str = "",
+    default_camera1_key: str = "camera1",
+    default_action_chunk_steps: int = 0,
+) -> None:
+    args = parse_args(
+        description,
+        default_model_name,
+        default_robot_id,
+        expected_model_type,
+        default_camera1_key,
+        default_action_chunk_steps,
+    )
+    if args.action_chunk_steps < 0:
+        raise ValueError("--action_chunk_steps must be non-negative.")
     logging.basicConfig(level=getattr(logging, args.log_level.upper()), format="[%(asctime)s] %(levelname)s: %(message)s")
     cameras = make_cameras(args)
     feature_keys = camera_feature_keys(args, cameras)
@@ -381,7 +425,7 @@ def main() -> None:
     try:
         tunnel_process = start_ssh_tunnel(args)
         health = get_server_health(args)
-        validate_server_schema(feature_keys, health)
+        validate_server_schema(feature_keys, health, args.expected_model_type)
         LOGGER.info("Validated server checkpoint %s.", health.get("checkpoint", "unknown"))
         robot = connect_robot(args)
         for camera in cameras.values():
@@ -424,13 +468,17 @@ def main() -> None:
                         raise ValueError(
                             "Server did not return a [steps, 6] action_chunk for the SO-101 policy."
                         )
+                    if args.action_chunk_steps:
+                        action_chunk = action_chunk[: args.action_chunk_steps]
                     pending_actions = [row for row in action_chunk]
             if pending_actions:
                 action = pending_actions.pop(0)
             else:
                 action = np.asarray(response["action"], dtype=np.float32)
             if action.size != len(SO101_JOINT_KEYS):
-                raise ValueError(f"Expected {len(SO101_JOINT_KEYS)} SmolVLA action values, got {action.size}.")
+                raise ValueError(
+                    f"Expected {len(SO101_JOINT_KEYS)} {args.model_name} action values, got {action.size}."
+                )
             if args.max_action_abs is not None:
                 action = np.clip(action, -args.max_action_abs, args.max_action_abs)
             mapped_action = dict(zip(SO101_JOINT_KEYS, action.tolist(), strict=True))
@@ -462,7 +510,9 @@ def main() -> None:
                     + "\n"
                 )
                 log_f.flush()
-            if args.preview and camera1_frame is not None and not show_preview(cameras, camera1_frame, action):
+            if args.preview and camera1_frame is not None and not show_preview(
+                cameras, camera1_frame, action, args.model_name
+            ):
                 break
             step += 1
             sleep_s = period_s - (time.time() - started)
