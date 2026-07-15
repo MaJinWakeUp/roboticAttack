@@ -156,7 +156,9 @@ third_party/
 outputs/
 checkpoints/
 results/
+run/
 runs/
+save_dir/
 slurm-*.out
 slurm-*.err
 *.ckpt
