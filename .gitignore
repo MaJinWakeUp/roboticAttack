@@ -149,7 +149,18 @@ cache/
 data/
 dataset/
 
+# External dependencies are installed or linked locally.
+third_party/
+
+# Training artifacts and scheduler output
 outputs/
+checkpoints/
+results/
+runs/
+slurm-*.out
+slurm-*.err
+*.ckpt
+*.safetensors
 
 # Rollout videos and wandb logs
 rollouts/
