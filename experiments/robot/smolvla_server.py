@@ -9,23 +9,24 @@ that produces misleading and potentially unsafe robot commands.
 Request body::
 
     {
-      "task": "put the block in the box",
+      "task": "Stack the red cube on the blue cube",
       "state": [six SO-101 joint positions],
       "images": {
         "camera1": "<base64 JPEG>",
-        "camera2": "<base64 JPEG>",
-        "camera3": "<base64 JPEG>"
+        "camera2": "<base64 JPEG>"
       },
-      "session_id": "robot-session-1"
+      "session_id": "so101-1",
+      "return_action_chunk": true
     }
 
 For a one-camera checkpoint, ``image_b64`` is also accepted. A request must
 include at least one image feature declared in the checkpoint configuration;
 SmolVLA supports a subset of its configured cameras when the checkpoint was
 trained that way.
-For example, ``majinwakeup30/smolvla_so100_stack_cube_v1`` was trained with
-one front view, exposed by its saved processor as ``camera1``
-(``observation.images.camera1``).
+For example, ``majinwakeup30/smolvla_so101_stack_cube_2_cameras`` was trained
+with an up view and a wrist view, exposed by its saved processor as
+``camera1`` (``observation.images.camera1``) and ``camera2``
+(``observation.images.camera2``).
 """
 
 import argparse
@@ -56,9 +57,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=int(os.environ.get("SMOLVLA_PORT", "8000")))
     parser.add_argument(
         "--checkpoint",
-        default=os.environ.get("CHECKPOINT", "majinwakeup30/smolvla_so100_stack_cube_v1"),
+        default=os.environ.get("CHECKPOINT", "majinwakeup30/smolvla_so101_stack_cube_2_cameras"),
     )
     parser.add_argument("--device", default=os.environ.get("DEVICE", "cuda:0"))
+    parser.add_argument(
+        "--image_keys",
+        default=os.environ.get("SMOLVLA_IMAGE_KEYS", ""),
+        help=(
+            "Comma-separated checkpoint image features that requests must provide. "
+            "Defaults to every image feature in the policy config. Use this when a base config "
+            "contains unused camera slots (for example: camera1,camera2)."
+        ),
+    )
     parser.add_argument(
         "--single_image_key",
         default=os.environ.get("SINGLE_IMAGE_KEY") or None,
@@ -145,6 +155,32 @@ def feature_shape(feature: Any) -> Sequence[int]:
     if isinstance(feature, Mapping) and "shape" in feature:
         return tuple(int(x) for x in feature["shape"])
     raise ValueError(f"Cannot determine feature shape from {feature!r}")
+
+
+def required_image_keys(input_features: Mapping[str, Any], configured_keys: str = "") -> List[str]:
+    """Select request image features, optionally excluding unused base-config camera slots."""
+    available_keys = sorted(key for key in input_features if key.startswith(OBS_IMAGES_PREFIX))
+    if not available_keys:
+        raise ValueError("Checkpoint does not define an observation image input feature.")
+    if not configured_keys.strip():
+        return available_keys
+
+    selected_keys: List[str] = []
+    for raw_key in configured_keys.split(","):
+        key = raw_key.strip()
+        if not key:
+            continue
+        full_key = key if key.startswith(OBS_IMAGES_PREFIX) else OBS_IMAGES_PREFIX + key
+        if full_key not in available_keys:
+            raise ValueError(
+                f"Configured image key {key!r} is not defined by the checkpoint; "
+                f"available features: {', '.join(available_keys)}"
+            )
+        if full_key not in selected_keys:
+            selected_keys.append(full_key)
+    if not selected_keys:
+        raise ValueError("--image_keys must contain at least one image feature.")
+    return selected_keys
 
 
 def decode_image(image_b64: str) -> np.ndarray:
@@ -239,6 +275,13 @@ class SmolVLARuntime:
 
         if not decoded_images:
             raise ValueError("missing_images: provide at least one base64 image.")
+        missing = [key for key in self.image_keys if key not in decoded_images]
+        if missing:
+            raise ValueError(
+                "missing_images: this checkpoint requires all of: "
+                + ", ".join(self.image_keys)
+                + f"; missing: {', '.join(missing)}"
+            )
 
         observation: Dict[str, Any] = {
             OBS_STATE: self.torch_module.from_numpy(state),
@@ -308,6 +351,7 @@ class SmolVLARequestHandler(BaseHTTPRequestHandler):
                 "state_key": OBS_STATE,
                 "state_dim": runtime.state_dim,
                 "image_keys": runtime.image_keys,
+                "required_image_keys": runtime.image_keys,
                 "action_dim": int(np.prod(feature_shape(runtime.policy.config.output_features["action"]))),
             },
         )
@@ -376,9 +420,7 @@ def main() -> None:
     input_features = policy.config.input_features
     if OBS_STATE not in input_features:
         raise ValueError(f"Checkpoint does not define required {OBS_STATE!r} input feature.")
-    image_keys = sorted(key for key in input_features if key.startswith(OBS_IMAGES_PREFIX))
-    if not image_keys:
-        raise ValueError("Checkpoint does not define an observation image input feature.")
+    image_keys = required_image_keys(input_features, args.image_keys)
 
     runtime = SmolVLARuntime(
         policy=policy,

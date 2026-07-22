@@ -31,11 +31,11 @@ export HF_HOME="${HF_HOME:-/scratch/${USER}/huggingface_cache}"
 export TOKENIZERS_PARALLELISM=false
 
 CUDAID="${CUDAID:-0}"
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 DEVICE="${DEVICE:-cuda:0}"
 DTYPE="${DTYPE:-bfloat16}"
-CHECKPOINT="${CHECKPOINT:-majinwakeup30/pi05_so100_stack_cube_merged_v1}"
+CHECKPOINT="${CHECKPOINT:-majinwakeup30/pi05_so101_stack_cube_2_cameras}"
 
 ARGS=(
     --host "${HOST}"

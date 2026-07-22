@@ -44,14 +44,17 @@ CUDAID="${CUDAID:-0}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 DEVICE="${DEVICE:-cuda:0}"
-CHECKPOINT="${CHECKPOINT:-majinwakeup30/smolvla_so100_stack_cube_merged}"
-# This one-camera checkpoint uses observation.images.camera1 for the front view.
+CHECKPOINT="${CHECKPOINT:-majinwakeup30/smolvla_so101_stack_cube_2_cameras}"
+# The inherited base config also declares an unused camera3 slot. Restrict the
+# server contract to the two views used to train this checkpoint.
+SMOLVLA_IMAGE_KEYS="${SMOLVLA_IMAGE_KEYS:-camera1,camera2}"
 
 ARGS=(
     --host "${HOST}"
     --port "${PORT}"
     --device "${DEVICE}"
     --checkpoint "${CHECKPOINT}"
+    --image_keys "${SMOLVLA_IMAGE_KEYS}"
 )
 
 if [[ -n "${SMOLVLA_API_KEY:-}" ]]; then

@@ -10,10 +10,13 @@ arm.
 Example request body::
 
     {
-      "task": "stack the red cube on top of the blue cube",
+      "task": "Stack the red cube on the blue cube",
       "state": [0, 0, 0, 0, 0, 0],
-      "images": {"front": "<base64 JPEG>"},
-      "session_id": "so100-1",
+      "images": {
+        "up": "<base64 JPEG>",
+        "wrist": "<base64 JPEG>"
+      },
+      "session_id": "so101-1",
       "return_action_chunk": true
     }
 """
@@ -45,7 +48,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=int(os.environ.get("PI05_PORT", "8000")))
     parser.add_argument(
         "--checkpoint",
-        default=os.environ.get("CHECKPOINT", "majinwakeup30/pi05_so100_stack_cube_merged_v1"),
+        default=os.environ.get(
+            "CHECKPOINT",
+            "majinwakeup30/pi05_so101_stack_cube_2_cameras",
+        ),
     )
     parser.add_argument("--device", default=os.environ.get("DEVICE", "cuda:0"))
     parser.add_argument("--dtype", choices=("bfloat16", "float32"), default="bfloat16")
@@ -119,6 +125,7 @@ class PI05RequestHandler(SmolVLARequestHandler):
                 "state_key": OBS_STATE,
                 "state_dim": runtime.state_dim,
                 "image_keys": runtime.image_keys,
+                "required_image_keys": runtime.image_keys,
                 "action_dim": int(np.prod(feature_shape(runtime.policy.config.output_features["action"]))),
                 "chunk_size": int(runtime.policy.config.chunk_size),
                 "n_action_steps": int(runtime.policy.config.n_action_steps),

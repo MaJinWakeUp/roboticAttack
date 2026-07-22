@@ -6,9 +6,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
-TASK="${TASK:-}"
+TASK="${TASK:-Stack the red cube on the blue cube}"
 ROBOT_PORT="${ROBOT_PORT:-}"
-CAMERA1_INDEX="${CAMERA1_INDEX:-}"
+CAMERA1_INDEX="${CAMERA1_INDEX:-${CAMERA_UP_INDEX:-}}"
+CAMERA2_INDEX="${CAMERA2_INDEX:-${CAMERA_WRIST_INDEX:-}}"
 SERVER_URL="${SERVER_URL:-http://127.0.0.1:8000}"
 CAMERA_WIDTH="${CAMERA_WIDTH:-640}"
 CAMERA_HEIGHT="${CAMERA_HEIGHT:-480}"
@@ -16,10 +17,11 @@ CAMERA_FPS="${CAMERA_FPS:-30}"
 CONTROL_HZ="${CONTROL_HZ:-30}"
 STEPS="${STEPS:-0}"
 MAX_RELATIVE_TARGET="${MAX_RELATIVE_TARGET:-10}"
+ACTION_CHUNK_STEPS="${ACTION_CHUNK_STEPS:-10}"
 
-if [[ -z "${TASK}" || -z "${ROBOT_PORT}" || -z "${CAMERA1_INDEX}" ]]; then
-    echo "Set TASK, ROBOT_PORT, and CAMERA1_INDEX. Example:" >&2
-    echo "  TASK='pick up the cube' ROBOT_PORT=/dev/ttyACM0 CAMERA1_INDEX=0 bash scripts/run_lerobot_smolvla_so101_client.sh" >&2
+if [[ -z "${ROBOT_PORT}" || -z "${CAMERA1_INDEX}" || -z "${CAMERA2_INDEX}" ]]; then
+    echo "Set ROBOT_PORT, CAMERA1_INDEX (up view), and CAMERA2_INDEX (wrist view). Example:" >&2
+    echo "  ROBOT_PORT=/dev/ttyACM0 CAMERA1_INDEX=0 CAMERA2_INDEX=1 bash scripts/run_lerobot_smolvla_so101_client.sh" >&2
     exit 1
 fi
 
@@ -28,21 +30,21 @@ ARGS=(
     --task "${TASK}"
     --robot_port "${ROBOT_PORT}"
     --camera1_index "${CAMERA1_INDEX}"
+    --camera1_key "${CAMERA1_KEY:-camera1}"
+    --camera2_index "${CAMERA2_INDEX}"
+    --camera2_key "${CAMERA2_KEY:-camera2}"
     --camera_width "${CAMERA_WIDTH}"
     --camera_height "${CAMERA_HEIGHT}"
     --camera_fps "${CAMERA_FPS}"
     --control_hz "${CONTROL_HZ}"
     --steps "${STEPS}"
     --max_relative_target "${MAX_RELATIVE_TARGET}"
+    --action_chunk_steps "${ACTION_CHUNK_STEPS}"
 )
 
 if [[ -n "${SMOLVLA_API_KEY:-}" ]]; then ARGS+=(--api_key "${SMOLVLA_API_KEY}"); fi
-if [[ -n "${CAMERA2_INDEX:-}" ]]; then ARGS+=(--camera2_index "${CAMERA2_INDEX}"); fi
-if [[ -n "${CAMERA3_INDEX:-}" ]]; then ARGS+=(--camera3_index "${CAMERA3_INDEX}"); fi
-ARGS+=(--camera1_key "${CAMERA1_KEY:-camera1}")
-if [[ -n "${CAMERA2_INDEX:-}" ]]; then ARGS+=(--camera2_key "${CAMERA2_KEY:-camera2}"); fi
 if [[ -n "${CAMERA3_INDEX:-}" ]]; then
-    ARGS+=(--camera3_key "${CAMERA3_KEY:-camera3}")
+    ARGS+=(--camera3_index "${CAMERA3_INDEX}" --camera3_key "${CAMERA3_KEY:-camera3}")
 fi
 if [[ -n "${ROBOT_ID:-}" ]]; then ARGS+=(--robot_id "${ROBOT_ID}"); fi
 if [[ -n "${MAX_ACTION_ABS:-}" ]]; then ARGS+=(--max_action_abs "${MAX_ACTION_ABS}"); fi

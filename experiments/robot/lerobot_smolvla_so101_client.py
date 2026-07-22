@@ -6,9 +6,9 @@ captures one to three OpenCV cameras, sends them to ``smolvla_server.py``, and
 optionally sends the returned six joint targets to the follower arm. Execution
 is opt-in; start with the default observe-only mode.
 
-The default camera mapping matches ``majinwakeup30/smolvla_so100_stack_cube_v1``:
-the one local front camera is sent as ``camera1``. Additional cameras remain
-available for checkpoints that use them.
+The default camera mapping matches ``majinwakeup30/smolvla_so101_stack_cube_2_cameras``:
+the local up-view camera is sent as ``camera1`` and the wrist-view camera as
+``camera2``. A third camera remains available for checkpoints that use it.
 """
 
 import argparse
@@ -45,7 +45,8 @@ def parse_args(
     default_robot_id: str = "smolvla_so101_client",
     expected_model_type: str = "",
     default_camera1_key: str = "camera1",
-    default_action_chunk_steps: int = 0,
+    default_camera2_key: str = "camera2",
+    default_action_chunk_steps: int = 10,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description or __doc__)
     parser.add_argument("--server_url", default="http://127.0.0.1:8000")
@@ -56,8 +57,8 @@ def parse_args(
     parser.add_argument("--model_name", default=default_model_name, help=argparse.SUPPRESS)
     parser.add_argument("--expected_model_type", default=expected_model_type, help=argparse.SUPPRESS)
 
-    parser.add_argument("--camera1_index", required=True, help="Training front-camera index or path.")
-    parser.add_argument("--camera2_index", default="", help="Optional second camera index or path.")
+    parser.add_argument("--camera1_index", required=True, help="Primary training camera index or path.")
+    parser.add_argument("--camera2_index", default="", help="Optional secondary training camera index or path.")
     parser.add_argument("--camera3_index", default="", help="Optional third camera index or path.")
     parser.add_argument(
         "--camera1_key",
@@ -66,8 +67,8 @@ def parse_args(
     )
     parser.add_argument(
         "--camera2_key",
-        default="camera2",
-        help="Checkpoint image feature name for camera2 (default: camera2).",
+        default=default_camera2_key,
+        help=f"Checkpoint image feature name for camera2 (default: {default_camera2_key}).",
     )
     parser.add_argument(
         "--camera3_key",
@@ -346,7 +347,10 @@ def get_server_health(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def validate_server_schema(
-    feature_keys: Mapping[str, str], health: Mapping[str, Any], expected_model_type: str = ""
+    feature_keys: Mapping[str, str],
+    health: Mapping[str, Any],
+    expected_model_type: str = "",
+    require_all_server_images: bool = False,
 ) -> None:
     """Fail before connecting to the arm when local camera/model schemas disagree."""
     if expected_model_type and str(health.get("model_type", "")) != expected_model_type:
@@ -370,6 +374,17 @@ def validate_server_schema(
             f"Server supports: {', '.join(sorted(expected_images))}; "
             f"client supplies unsupported: {', '.join(sorted(unsupported_images))}."
         )
+    if require_all_server_images:
+        required_images = {
+            str(key)
+            for key in health.get("required_image_keys", health.get("image_keys", []))
+        }
+        missing_images = required_images - supplied_images
+        if missing_images:
+            raise ValueError(
+                "The client is missing camera features required by this checkpoint: "
+                f"{', '.join(sorted(missing_images))}."
+            )
     if int(health.get("action_dim", -1)) != len(SO101_JOINT_KEYS):
         raise ValueError(
             f"Server returns action_dim={health.get('action_dim')}; this SO-101 client requires "
@@ -403,7 +418,9 @@ def main(
     default_robot_id: str = "smolvla_so101_client",
     expected_model_type: str = "",
     default_camera1_key: str = "camera1",
-    default_action_chunk_steps: int = 0,
+    default_camera2_key: str = "camera2",
+    default_action_chunk_steps: int = 10,
+    require_all_server_images: bool = True,
 ) -> None:
     args = parse_args(
         description,
@@ -411,6 +428,7 @@ def main(
         default_robot_id,
         expected_model_type,
         default_camera1_key,
+        default_camera2_key,
         default_action_chunk_steps,
     )
     if args.action_chunk_steps < 0:
@@ -425,7 +443,12 @@ def main(
     try:
         tunnel_process = start_ssh_tunnel(args)
         health = get_server_health(args)
-        validate_server_schema(feature_keys, health, args.expected_model_type)
+        validate_server_schema(
+            feature_keys,
+            health,
+            args.expected_model_type,
+            require_all_server_images=require_all_server_images,
+        )
         LOGGER.info("Validated server checkpoint %s.", health.get("checkpoint", "unknown"))
         robot = connect_robot(args)
         for camera in cameras.values():
